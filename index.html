@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SeamlessPay™ - Payment</title>
+    <title>Friction Payment</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -71,10 +71,13 @@
                     </div>
                 </div>
 
-                <!-- Total Amount Display (Optional but adds touch) -->
+                <!-- Total Amount Input -->
                 <div class="flex justify-between items-center py-4 border-t border-gray-100 mt-2">
-                    <span class="text-gray-500 font-medium">Total to pay</span>
-                    <span class="text-2xl font-bold text-gray-900">$19.00</span>
+                    <label for="paymentAmount" class="text-gray-500 font-medium">Total to pay</label>
+                    <div class="flex items-center">
+                        <span class="text-2xl font-bold text-gray-900 mr-1">$</span>
+                        <input type="number" id="paymentAmount" value="19.00" step="0.01" min="0.01" class="w-32 text-right text-2xl font-bold text-gray-900 bg-transparent border-b border-gray-300 focus:outline-none focus:border-black focus:ring-0 p-0">
+                    </div>
                 </div>
 
                 <!-- Pay Button -->
@@ -119,7 +122,7 @@
                 </div>
                 <div class="flex justify-between items-center text-neutral-500 font-mono text-xs tracking-[0.3em] mt-4 uppercase border-t border-neutral-700 pt-4 mx-8">
                     <span>GENERATED VALUE</span>
-                    <span class="text-neutral-400">TARGET: $19.00</span>
+                    <span class="text-neutral-400" id="targetDisplay">TARGET: $19.00</span>
                 </div>
             </div>
 
@@ -159,13 +162,15 @@
 
     <script>
         const payBtn = document.querySelector('button[type="button"]'); // This is the initial "Pay Now" button
+        const paymentAmountInput = document.getElementById('paymentAmount');
         const overlay = document.getElementById('extractionOverlay');
         const energyValue = document.getElementById('energyValue');
         const warningMessage = document.getElementById('warningMessage');
         const manualOverrideBtn = document.getElementById('manualOverride');
+        const targetDisplay = document.getElementById('targetDisplay');
 
         let balance = 0.00;
-        const targetAmount = 19.00;
+        let targetAmount = 19.00;
         let lastShakeTime = Date.now();
         let isComplete = false;
         let drainInterval;
@@ -175,8 +180,120 @@
         const shakeThreshold = 10; // Lowered from 15 for easier activation
 
         // Initialize Audio context for potential sound effects (optional) or just setup state
+        let bgOsc, bgGain;
+        let audioCtx;
+
+        function initAudio() {
+             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
         
+        // 1. Entrance Sound (Game Start)
+        function playGameStartSound() {
+            if (!audioCtx) initAudio();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1);
+            
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // 2. Interaction Sound (Coin/Shake)
+        function playCoinSound() {
+            if (!audioCtx) initAudio();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'square'; // More "gamey" 8-bit sound
+            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1800, audioCtx.currentTime + 0.1);
+
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        // 3. Background Ambience (Game Loop) - Using retro.wav
+        let bgAudio; // separate audio element for file playback
+
+        function startBackgroundMusic() {
+            if (!bgAudio) {
+                bgAudio = new Audio('retro.wav');
+                bgAudio.loop = true;
+                bgAudio.volume = 0.5; // Adjust volume as needed
+            }
+            bgAudio.play().catch(e => console.log("Audio play failed:", e));
+        }
+
+        function stopBackgroundMusic() {
+            if (bgAudio) {
+                // Fade out effect
+                let fadeEff = setInterval(() => {
+                    if (bgAudio.volume > 0.05) {
+                        bgAudio.volume -= 0.05;
+                    } else {
+                        clearInterval(fadeEff);
+                        bgAudio.pause();
+                        bgAudio.currentTime = 0;
+                    }
+                }, 50);
+            }
+        }
+
+        // 4. Success Sound
+        function playSuccessSound() {
+             if (!audioCtx) initAudio();
+            
+            // Major chord arpeggio
+            [523.25, 659.25, 783.99, 1046.50].forEach((freq, index) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                
+                const startTime = audioCtx.currentTime + (index * 0.1);
+                
+                gain.gain.setValueAtTime(0, startTime);
+                gain.gain.linearRampToValueAtTime(0.2, startTime + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.001, startTime + 1.5);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start(startTime);
+                osc.stop(startTime + 1.5);
+            });
+        }
+
         payBtn.addEventListener('click', async () => {
+            // Update Target Amount from Input
+            const val = parseFloat(paymentAmountInput.value);
+            if(!isNaN(val) && val > 0) {
+                 targetAmount = val;
+                 if(targetDisplay) {
+                     targetDisplay.textContent = 'TARGET: $' + targetAmount.toFixed(2);
+                 }
+            }
+
+            initAudio(); // Ensure context is created on user gesture
+            playGameStartSound();
+            startBackgroundMusic();
+            
             // Show Overlay
             overlay.classList.remove('hidden');
             
@@ -238,10 +355,15 @@
         function addValue(amount) {
             if (isComplete) return;
 
+            // Switch to Green (charging) state
+            energyValue.classList.remove('from-red-300', 'to-red-600', 'drop-shadow-[0_0_35px_rgba(239,68,68,0.6)]');
+            energyValue.classList.add('from-green-300', 'to-green-600', 'drop-shadow-[0_0_35px_rgba(34,197,94,0.6)]');
+
             balance += amount;
             lastShakeTime = Date.now(); // Reset inactivity timer
             updateDisplay();
-            
+            playCoinSound(); // Game sound effect
+
             // Haptic feedback if available
             if (navigator.vibrate) navigator.vibrate(50);
         }
@@ -252,9 +374,13 @@
 
                 const timeSinceLastAction = Date.now() - lastShakeTime;
 
-                if (timeSinceLastAction > 2000) {
+                if (timeSinceLastAction > 1000) {
                     if (balance > 0) {
-                        balance = Math.max(0, balance - 0.05);
+                        // Switch to Red (draining) state
+                        energyValue.classList.remove('from-green-300', 'to-green-600', 'drop-shadow-[0_0_35px_rgba(34,197,94,0.6)]');
+                        energyValue.classList.add('from-red-300', 'to-red-600', 'drop-shadow-[0_0_35px_rgba(239,68,68,0.6)]');
+
+                        balance = Math.max(0, balance - 0.5);
                         updateDisplay();
                         warningMessage.classList.remove('hidden');
                     }
@@ -277,6 +403,8 @@
             isComplete = true;
             clearInterval(drainInterval);
             window.removeEventListener('devicemotion', handleMotion);
+            stopBackgroundMusic();
+            playSuccessSound();
             
             warningMessage.classList.add('hidden');
             
